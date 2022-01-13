@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/xeipuuv/gojsonschema"
@@ -171,12 +172,7 @@ func validateAgainstSchema(body interface{}, resource *ValidationResult, schemaC
 		return handleMissingSchema(err, config)
 	}
 
-	// Without forcing these types the schema fails to load
-	// Need to Work out proper handling for these types
-	gojsonschema.FormatCheckers.Add("int64", ValidFormat{})
-	gojsonschema.FormatCheckers.Add("byte", ValidFormat{})
-	gojsonschema.FormatCheckers.Add("int32", ValidFormat{})
-	gojsonschema.FormatCheckers.Add("int-or-string", ValidFormat{})
+	registerFormatCheckers()
 
 	documentLoader := gojsonschema.NewGoLoader(body)
 	results, err := schema.Validate(documentLoader)
@@ -381,4 +377,27 @@ func singleLineErrorFormat(es []error) string {
 		messages[i] = e.Error()
 	}
 	return strings.Join(messages, "\n")
+}
+
+var formatCheckersRegistered int32
+var formatCheckersRegisterWait = make(chan struct{})
+
+// registerFormatCheckers registers the gojsonschema FormatCheckers required for schemas to properly load.
+// This function uses an atomic CAS and a wait channel to prevent panics from gojsonschema.FormatCheckerChain.Add
+func registerFormatCheckers() {
+	if atomic.CompareAndSwapInt32(&formatCheckersRegistered, 0, 1) {
+		unsafeRegisterFormatCheckers()
+		close(formatCheckersRegisterWait)
+	}
+
+	<-formatCheckersRegisterWait
+}
+
+func unsafeRegisterFormatCheckers() {
+	// Without forcing these types the schema fails to load
+	// Need to Work out proper handling for these types
+	gojsonschema.FormatCheckers.Add("int64", ValidFormat{})
+	gojsonschema.FormatCheckers.Add("byte", ValidFormat{})
+	gojsonschema.FormatCheckers.Add("int32", ValidFormat{})
+	gojsonschema.FormatCheckers.Add("int-or-string", ValidFormat{})
 }
