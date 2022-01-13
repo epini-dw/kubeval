@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	multierror "github.com/hashicorp/go-multierror"
@@ -56,6 +57,27 @@ func TestValidateValidInputs(t *testing.T) {
 			t.Errorf("Validate should pass when testing valid configuration in %s, got errors: %v", test, err)
 		}
 	}
+}
+
+func TestValidateInputsConcurrently(t *testing.T) {
+	var tests = validTestFiles
+	var wg sync.WaitGroup
+	for _, test := range tests {
+		filePath, _ := filepath.Abs("../fixtures/" + test)
+		fileContents, _ := ioutil.ReadFile(filePath)
+		config := NewDefaultConfig()
+		config.DefaultNamespace = "the-default-namespace"
+		config.FileName = test
+		config.KindsToSkip = []string{"SkipThisKind"}
+
+		wg.Add(1)
+		go func() {
+			_, _ = Validate(fileContents, config)
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
 }
 
 func TestValidateValidInputsWithCache(t *testing.T) {
